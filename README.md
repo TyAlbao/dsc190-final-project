@@ -32,7 +32,7 @@ python main.py
 
 The report is split into four sections:
 
-- `Games`: biggest win-expectancy swing, most lead changes, most/fewest
+- `Games`: play with biggest win-expectancy swing, most lead changes, most/fewest
   total runs, and most/fewest total hits.
 - `Hitters`: best overall hitter game by game wOBA, hardest-hit ball, and
   farthest-hit ball.
