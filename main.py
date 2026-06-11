@@ -748,6 +748,82 @@ def print_section(title):
     print("=" * 72)
 
 
+def leader_from_score(home_score, away_score):
+    if pd.isna(home_score) or pd.isna(away_score):
+        return None
+    if home_score > away_score:
+        return "home"
+    if away_score > home_score:
+        return "away"
+    return "tie"
+
+
+def game_with_most_lead_changes(data):
+    required_columns = {
+        "game_pk",
+        "events",
+        "at_bat_number",
+        "pitch_number",
+        "post_home_score",
+        "post_away_score",
+        "home_team",
+        "away_team",
+        "game_date",
+    }
+    if not required_columns.issubset(data.columns):
+        return None
+
+    completed_plays = data[data["events"].notna()].copy()
+    if completed_plays.empty:
+        return None
+
+    best_game = None
+    for game_pk, game in completed_plays.groupby("game_pk"):
+        game = game.sort_values(["at_bat_number", "pitch_number"])
+        previous_leader = None
+        lead_changes = 0
+
+        for _, row in game.iterrows():
+            leader = leader_from_score(row.get("post_home_score"), row.get("post_away_score"))
+            if leader is None or leader == "tie":
+                continue
+            if previous_leader is not None and leader != previous_leader:
+                lead_changes += 1
+            previous_leader = leader
+
+        last_play = game.iloc[-1]
+        summary = {
+            "game_pk": int(game_pk),
+            "game_date": last_play.get("game_date"),
+            "away_team": last_play.get("away_team"),
+            "home_team": last_play.get("home_team"),
+            "away_score": int(last_play.get("post_away_score")),
+            "home_score": int(last_play.get("post_home_score")),
+            "lead_changes": lead_changes,
+        }
+
+        if best_game is None or summary["lead_changes"] > best_game["lead_changes"]:
+            best_game = summary
+
+    return best_game
+
+
+def print_lead_changes_result(summary):
+    print("\nGame with most lead changes")
+    if summary is None:
+        print("No qualifying games found.")
+        return
+
+    print(f"Game: {summary['game_date']} - {summary['away_team']} at {summary['home_team']}")
+    print(f"Lead changes: {summary['lead_changes']}")
+    print(
+        "Final score: "
+        f"{summary['away_team']} {summary['away_score']}, "
+        f"{summary['home_team']} {summary['home_score']}"
+    )
+    print(f"Game PK: {summary['game_pk']}")
+
+
 def bounded_score(value, low, high):
     if pd.isna(value):
         return 0
@@ -1170,6 +1246,7 @@ def main():
     )
 
     win_exp_row = row_with_largest_abs_value(videoable_plays, "delta_home_win_exp")
+    lead_changes_game = game_with_most_lead_changes(data)
     hardest_hit_row = row_with_largest_value(videoable_plays, "launch_speed")
     farthest_hit_row = row_with_largest_value(videoable_plays, "hit_distance_sc")
     hardest_pitch_row = row_with_largest_value(pitches, "release_speed")
@@ -1193,6 +1270,7 @@ def main():
             "change in home win expectancy"
         ),
     )
+    print_lead_changes_result(lead_changes_game)
 
     print_section("Hitters")
     print_result(
