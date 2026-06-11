@@ -11,3 +11,6 @@ wheels/
 
 # Notebooks
 *.ipynb
+
+# Submission
+repo_url.txt
