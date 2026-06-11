@@ -1600,7 +1600,7 @@ def main():
         catch_model=catch_model,
     )
 
-    print_section("Best Games")
+    print_section("Games")
     print_win_exp_result(
         "Biggest swing in win expectancy",
         win_exp_row,
