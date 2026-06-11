@@ -86,6 +86,7 @@ BALLPARK_DIMENSIONS = {
 
 HIT_RESULT_BY_EVENT = {
     "single": "Single",
+    "single_error": "Single",
     "double": "Double",
     "triple": "Triple",
     "home_run": "Home Run",
@@ -108,6 +109,42 @@ HIT_RESULT_BY_EVENT = {
     "triple_play": "Triple Play",
     "walk": "Walk",
     "intent_walk": "Walk",
+    "missed_bunt": "Missed Bunt",
+    "foul": "Foul Ball",
+    "foul_bunt": "Foul Ball",
+    "foul_tip": "Foul Ball",
+}
+
+PITCH_RESULT_BY_DESCRIPTION = {
+    "ball": "Ball",
+    "called_strike": "Called Strike",
+    "swinging_strike": "Swinging Strike",
+    "foul": "Foul",
+    "blocked_ball": "Ball Blocked in Dirt",
+    "hit_by_pitch": "Hit By Pitch",
+    "missed_bunt": "Missed Bunt",
+    "pitchout": "Pitchout",
+    "foul_tip": "Foul Tip",
+    "foul_bunt": "Foul Bunt",
+    "swinging_strike_blocked": "Swinging Strike, Blocked in Dirt",
+    "bunt_foul_tip": "Bunt Foul Tip",
+    "foul_pitchout": "Foul Pitchout",
+    "automatic_ball": "Automatic Ball",
+    "automatic_strike": "Automatic Strike",
+    "passed_ball": "Passed Ball",
+    "wild_pitch": "Wild Pitch",
+    "other_advance": "Other Advance",
+    "pickoff_1b": "Pickoff, 1B",
+    "pickoff_2b": "Pickoff, 2B",
+    "pickoff_3b": "Pickoff, 3B",
+    "pickoff_attempt_1b": "Pickoff Attempt, 1B",
+    "pickoff_attempt_2b": "Pickoff Attempt, 2B",
+    "pickoff_attempt_3b": "Pickoff Attempt, 3B",
+    "pickoff_caught_stealing_home": "Pickoff Caught Stealing Home",
+    "pickoff_caught_stealing_2b": "Pickoff, Caught Stealing, 2B",
+    "pickoff_caught_stealing_3b": "Pickoff, Caught Stealing, 3B",
+    "pickoff_error_1b": "Pickoff, Error, 1B",
+    "pickoff_error_2b": "Pickoff, Error, 2B",
 }
 
 
@@ -196,6 +233,7 @@ def make_mlb_video_search_url(
     outs=None,
     hit_distance=None,
     hit_results=None,
+    pitch_results=None,
     seasons=None,
     team_id=None,
     game_dates=None,
@@ -208,29 +246,6 @@ def make_mlb_video_search_url(
 ):
     clauses = []
 
-    if runner_on_base is not None:
-        values = ",".join(str(base) for base in runner_on_base)
-        clauses.append(f"RunnerOnBase == [{values}]")
-
-    if outs is not None:
-        values = ",".join(str(out) for out in outs)
-        clauses.append(f"Outs = [{values}]")
-
-    if hit_distance is not None:
-        minimum, maximum = hit_distance
-        clauses.append(f"HitDistance = {{{{ {minimum}, {maximum} }}}}")
-
-    if hit_results is not None:
-        values = json.dumps(hit_results, separators=(",", ":"))
-        clauses.append(f"HitResult = {values}")
-
-    if seasons is not None:
-        values = ",".join(str(season) for season in seasons)
-        clauses.append(f"Season = [{values}]")
-
-    if team_id is not None:
-        clauses.append(f"TeamId == [{team_id}]")
-
     if game_dates is not None:
         values = json.dumps(game_dates, separators=(",", ":"))
         clauses.append(f"Date = {values}")
@@ -241,6 +256,14 @@ def make_mlb_video_search_url(
     if pitcher_id is not None:
         clauses.append(f"PitcherId = [{pitcher_id}]")
 
+    if innings is not None:
+        values = ",".join(str(inning) for inning in innings)
+        clauses.append(f"Inning = [{values}]")
+
+    if outs is not None:
+        values = ",".join(str(out) for out in outs)
+        clauses.append(f"Outs = [{values}]")
+
     if balls is not None:
         values = ",".join(str(ball) for ball in balls)
         clauses.append(f"Balls = [{values}]")
@@ -249,9 +272,28 @@ def make_mlb_video_search_url(
         values = ",".join(str(strike) for strike in strikes)
         clauses.append(f"Strikes = [{values}]")
 
-    if innings is not None:
-        values = ",".join(str(inning) for inning in innings)
-        clauses.append(f"Inning = [{values}]")
+    if hit_results is not None:
+        values = json.dumps(hit_results, separators=(",", ":"))
+        clauses.append(f"HitResult = {values}")
+
+    if pitch_results is not None:
+        values = json.dumps(pitch_results, separators=(",", ":"))
+        clauses.append(f"PitchResult = {values}")
+
+    if runner_on_base is not None:
+        values = ",".join(str(base) for base in runner_on_base)
+        clauses.append(f"RunnerOnBase == [{values}]")
+
+    if hit_distance is not None:
+        minimum, maximum = hit_distance
+        clauses.append(f"HitDistance = {{{{ {minimum}, {maximum} }}}}")
+
+    if seasons is not None:
+        values = ",".join(str(season) for season in seasons)
+        clauses.append(f"Season = [{values}]")
+
+    if team_id is not None:
+        clauses.append(f"TeamId == [{team_id}]")
 
     query = " AND ".join(clauses)
     if query:
@@ -475,25 +517,34 @@ def hit_result_for_video(row):
     return HIT_RESULT_BY_EVENT.get(str(event))
 
 
+def game_date_for_video(row):
+    game_date = row.get("game_date")
+    if pd.isna(game_date):
+        return None
+
+    return pd.to_datetime(game_date).date().isoformat()
+
+
+def pitch_result_for_video(row):
+    description = row.get("description")
+    if pd.isna(description):
+        return None
+
+    return str(description)
+
+
 def video_url_for_play(row):
-    season = row.get("game_year")
-    team_abbr = batting_team_for_play(row)
-    team_id = TEAM_IDS.get(str(team_abbr).upper()) if pd.notna(team_abbr) else None
     batter_id = row.get("batter")
     outs = row.get("outs_when_up")
     balls = row.get("balls")
     strikes = row.get("strikes")
     inning = row.get("inning")
-    game_date = row.get("game_date")
+    game_date = game_date_for_video(row)
     hit_result = hit_result_for_video(row)
 
     return make_mlb_video_search_url(
-        runner_on_base=runners_on_base(row),
         outs=[int(outs)] if pd.notna(outs) else None,
-        hit_distance=hit_distance_window(row),
         hit_results=[hit_result] if hit_result is not None else None,
-        seasons=[int(season)] if pd.notna(season) else None,
-        team_id=team_id,
         game_dates=[str(game_date)] if pd.notna(game_date) else None,
         batter_id=int(batter_id) if pd.notna(batter_id) else None,
         balls=[int(balls)] if pd.notna(balls) else None,
@@ -503,21 +554,17 @@ def video_url_for_play(row):
 
 
 def video_url_for_pitch(row):
-    season = row.get("game_year")
-    team_abbr = pitching_team_for_play(row)
-    team_id = TEAM_IDS.get(str(team_abbr).upper()) if pd.notna(team_abbr) else None
     pitcher_id = row.get("pitcher")
     outs = row.get("outs_when_up")
     balls = row.get("balls")
     strikes = row.get("strikes")
     inning = row.get("inning")
-    game_date = row.get("game_date")
+    game_date = game_date_for_video(row)
+    pitch_result = pitch_result_for_video(row)
 
     return make_mlb_video_search_url(
-        runner_on_base=runners_on_base(row),
         outs=[int(outs)] if pd.notna(outs) else None,
-        seasons=[int(season)] if pd.notna(season) else None,
-        team_id=team_id,
+        pitch_results=[pitch_result] if pitch_result is not None else None,
         game_dates=[str(game_date)] if pd.notna(game_date) else None,
         pitcher_id=int(pitcher_id) if pd.notna(pitcher_id) else None,
         balls=[int(balls)] if pd.notna(balls) else None,
@@ -527,24 +574,17 @@ def video_url_for_pitch(row):
 
 
 def video_url_for_defensive_play(row):
-    season = row.get("game_year")
-    team_abbr = pitching_team_for_play(row)
-    team_id = TEAM_IDS.get(str(team_abbr).upper()) if pd.notna(team_abbr) else None
     batter_id = row.get("batter")
     outs = row.get("outs_when_up")
     balls = row.get("balls")
     strikes = row.get("strikes")
     inning = row.get("inning")
-    game_date = row.get("game_date")
+    game_date = game_date_for_video(row)
     hit_result = hit_result_for_video(row)
 
     return make_mlb_video_search_url(
-        runner_on_base=runners_on_base(row),
         outs=[int(outs)] if pd.notna(outs) else None,
-        hit_distance=hit_distance_window(row),
         hit_results=[hit_result] if hit_result is not None else None,
-        seasons=[int(season)] if pd.notna(season) else None,
-        team_id=team_id,
         game_dates=[str(game_date)] if pd.notna(game_date) else None,
         batter_id=int(batter_id) if pd.notna(batter_id) else None,
         balls=[int(balls)] if pd.notna(balls) else None,
