@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from datetime import date, timedelta
 from urllib.parse import urlencode
 
@@ -46,6 +47,40 @@ TEAM_IDS = {
     "TOR": 141,
     "WSH": 120,
 }
+
+
+HIT_RESULT_BY_EVENT = {
+    "single": "Single",
+    "double": "Double",
+    "triple": "Triple",
+    "home_run": "Home Run",
+    "field_out": "Out",
+    "force_out": "Out",
+    "fielders_choice_out": "Fielders Choice",
+    "other_out": "Out",
+    "strikeout": "Strikeout",
+    "strikeout_double_play": "Double Play",
+    "field_error": "Error",
+    "catcher_interf": "Catcher Interference",
+    "hit_by_pitch": "Hit By Pitch",
+    "double_play": "Double Play",
+    "grounded_into_double_play": "Double Play",
+    "sac_fly_double_play": "Double Play",
+    "fielders_choice": "Fielders Choice",
+    "sac_bunt": "Sacrifice",
+    "sac_fly": "Sacrifice",
+    "sac_bunt_double_play": "Double Play",
+    "triple_play": "Triple Play",
+    "walk": "Walk",
+    "intent_walk": "Walk",
+}
+
+
+BATTER_NAME_PATTERN = re.compile(
+    r"^(?P<name>.+?) "
+    r"(homers|singles|doubles|triples|grounds|lines|flies|pops|strikes|walks|"
+    r"reaches|hits|bunts|fouls|is hit|called out)"
+)
 
 
 def make_mlb_video_search_url(
@@ -131,6 +166,29 @@ def get_batter_names(data):
     return dict(zip(lookup["key_mlbam"], lookup["name"]))
 
 
+def format_statcast_player_name(name):
+    if pd.isna(name) or not name:
+        return None
+
+    name = str(name)
+    if "," in name:
+        last, first = [part.strip() for part in name.split(",", maxsplit=1)]
+        return f"{first} {last}".title()
+
+    return name.title()
+
+
+def player_name_from_description(description):
+    if pd.isna(description) or not description:
+        return None
+
+    match = BATTER_NAME_PATTERN.search(str(description))
+    if not match:
+        return None
+
+    return match.group("name").strip().title()
+
+
 def clean_statcast_data(data):
     data = data.copy()
     numeric_columns = [
@@ -172,18 +230,26 @@ def hit_distance_window(row, padding=3):
     return max(0, rounded - padding), rounded + padding
 
 
+def hit_result_for_video(row):
+    event = row.get("events")
+    if pd.isna(event):
+        return None
+
+    return HIT_RESULT_BY_EVENT.get(str(event))
+
+
 def video_url_for_play(row):
     season = row.get("game_year")
     team_abbr = batting_team_for_play(row)
     team_id = TEAM_IDS.get(str(team_abbr).upper()) if pd.notna(team_abbr) else None
     outs = row.get("outs_when_up")
-    event = row.get("events")
+    hit_result = hit_result_for_video(row)
 
     return make_mlb_video_search_url(
         runner_on_base=runners_on_base(row),
         outs=[int(outs)] if pd.notna(outs) else None,
         hit_distance=hit_distance_window(row),
-        hit_results=[str(event).replace("_", " ").title()] if pd.notna(event) else None,
+        hit_results=[hit_result] if hit_result is not None else None,
         seasons=[int(season)] if pd.notna(season) else None,
         team_id=team_id,
     )
@@ -197,12 +263,19 @@ def format_value(value, unit="", decimals=1):
 
 def describe_play(label, row, batter_names, metric_text):
     batter_id = int(row["batter"]) if pd.notna(row.get("batter")) else None
-    player = batter_names.get(batter_id, f"MLBAM {batter_id}" if batter_id else "Unknown")
+    statcast_name = format_statcast_player_name(row.get("player_name"))
+    description = row.get("des", "")
+    description_name = player_name_from_description(description)
+    player = (
+        description_name
+        or batter_names.get(batter_id)
+        or statcast_name
+        or (f"MLBAM {batter_id}" if batter_id else "Unknown")
+    )
     game_date = row.get("game_date", "unknown date")
     batting_team = batting_team_for_play(row)
     matchup = f"{row.get('away_team')} at {row.get('home_team')}"
     event = str(row.get("events", "unknown")).replace("_", " ")
-    description = row.get("des", "")
 
     print(f"\n{label}")
     print(f"Player: {player}")
@@ -250,10 +323,13 @@ def main():
 
     batter_names = get_batter_names(data)
     completed_plays = data[data["events"].notna()]
+    videoable_plays = completed_plays[
+        completed_plays["events"].map(HIT_RESULT_BY_EVENT).notna()
+    ]
 
-    win_exp_row = row_with_largest_abs_value(completed_plays, "delta_home_win_exp")
-    hardest_hit_row = row_with_largest_value(completed_plays, "launch_speed")
-    farthest_hit_row = row_with_largest_value(completed_plays, "hit_distance_sc")
+    win_exp_row = row_with_largest_abs_value(videoable_plays, "delta_home_win_exp")
+    hardest_hit_row = row_with_largest_value(videoable_plays, "launch_speed")
+    farthest_hit_row = row_with_largest_value(videoable_plays, "hit_distance_sc")
 
     print_result(
         "Biggest swing in win expectancy",
