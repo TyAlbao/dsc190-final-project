@@ -706,6 +706,113 @@ def row_with_smallest_value(data, column):
     return data.loc[values.idxmin()]
 
 
+def format_count_stat(count, singular, plural=None):
+    if count == 0:
+        return None
+    label = singular if count == 1 else (plural or f"{singular}s")
+    return f"{count} {label}"
+
+
+def best_hitter_game(data, batter_names):
+    required_columns = {
+        "game_pk",
+        "batter",
+        "woba_value",
+        "woba_denom",
+        "events",
+        "home_team",
+        "away_team",
+        "game_date",
+    }
+    if not required_columns.issubset(data.columns):
+        return None
+
+    completed = data[data["events"].notna()].copy()
+    completed["woba_value"] = pd.to_numeric(completed["woba_value"], errors="coerce")
+    completed["woba_denom"] = pd.to_numeric(completed["woba_denom"], errors="coerce")
+    qualified = completed[completed["woba_denom"].fillna(0) > 0]
+    if qualified.empty:
+        return None
+
+    grouped = qualified.groupby(["game_pk", "batter"], dropna=True).agg(
+        woba_value=("woba_value", "sum"),
+        woba_denom=("woba_denom", "sum"),
+    )
+    grouped = grouped[grouped["woba_denom"] > 0]
+    if grouped.empty:
+        return None
+
+    grouped["woba"] = grouped["woba_value"] / grouped["woba_denom"]
+    game_pk, batter_id = grouped["woba"].idxmax()
+    player_rows = completed[
+        (completed["game_pk"] == game_pk) & (completed["batter"] == batter_id)
+    ]
+    first_row = player_rows.iloc[0]
+    events = player_rows["events"]
+    singles = int((events == "single").sum())
+    doubles = int((events == "double").sum())
+    triples = int((events == "triple").sum())
+    homers = int((events == "home_run").sum())
+    walks = int(events.isin(["walk", "intent_walk"]).sum())
+    strikeouts = int(events.isin(["strikeout", "strikeout_double_play"]).sum())
+    hbp = int((events == "hit_by_pitch").sum())
+    hits = singles + doubles + triples + homers
+    total_bases = singles + 2 * doubles + 3 * triples + 4 * homers
+    pa = int(len(player_rows))
+    batter_id = int(batter_id)
+    description_name = None
+    for description in player_rows["des"]:
+        description_name = player_name_from_description(description)
+        if description_name:
+            break
+
+    return {
+        "player": description_name or batter_names.get(batter_id) or f"MLBAM {batter_id}",
+        "batter_id": batter_id,
+        "game_pk": int(game_pk),
+        "game_date": first_row.get("game_date"),
+        "away_team": first_row.get("away_team"),
+        "home_team": first_row.get("home_team"),
+        "woba": float(grouped.loc[(game_pk, batter_id), "woba"]),
+        "pa": pa,
+        "hits": hits,
+        "singles": singles,
+        "doubles": doubles,
+        "triples": triples,
+        "homers": homers,
+        "walks": walks,
+        "strikeouts": strikeouts,
+        "hbp": hbp,
+        "total_bases": total_bases,
+    }
+
+
+def print_best_hitter_game(summary):
+    print("\nBest overall hitter game")
+    if summary is None:
+        print("No qualifying hitter games found.")
+        return
+
+    stat_parts = [
+        format_count_stat(summary["singles"], "single"),
+        format_count_stat(summary["doubles"], "double"),
+        format_count_stat(summary["triples"], "triple"),
+        format_count_stat(summary["homers"], "homer"),
+        format_count_stat(summary["walks"], "walk"),
+        format_count_stat(summary["hbp"], "hit by pitch", "hit by pitch"),
+        format_count_stat(summary["strikeouts"], "strikeout"),
+    ]
+    stat_line = ", ".join(part for part in stat_parts if part is not None)
+
+    print(f"Player: {summary['player']}")
+    print(f"Metric: {summary['woba']:.3f} game wOBA")
+    print(f"Game: {summary['game_date']} - {summary['away_team']} at {summary['home_team']}")
+    print(f"Line: {summary['hits']} hits, {summary['total_bases']} total bases, {summary['pa']} PA")
+    if stat_line:
+        print(f"Stats: {stat_line}")
+    print(f"Game PK: {summary['game_pk']}")
+
+
 def print_result(label, row, batter_names, metric_text):
     if row is None:
         print(f"\n{label}")
@@ -1333,6 +1440,7 @@ def main():
     win_exp_row = row_with_largest_abs_value(videoable_plays, "delta_home_win_exp")
     lead_changes_game = game_with_most_lead_changes(data)
     game_summaries = game_stat_summaries(data)
+    best_hitter_summary = best_hitter_game(data, batter_names)
     hardest_hit_row = row_with_largest_value(videoable_plays, "launch_speed")
     farthest_hit_row = row_with_largest_value(videoable_plays, "hit_distance_sc")
     hardest_pitch_row = row_with_largest_value(pitches, "release_speed")
@@ -1383,6 +1491,7 @@ def main():
     )
 
     print_section("Hitters")
+    print_best_hitter_game(best_hitter_summary)
     print_result(
         "Hardest-hit ball",
         hardest_hit_row,
