@@ -92,6 +92,7 @@ def make_mlb_video_search_url(
     team_id=None,
     game_dates=None,
     batter_id=None,
+    pitcher_id=None,
     balls=None,
     strikes=None,
     innings=None,
@@ -128,6 +129,9 @@ def make_mlb_video_search_url(
 
     if batter_id is not None:
         clauses.append(f"BatterId = [{batter_id}]")
+
+    if pitcher_id is not None:
+        clauses.append(f"PitcherId = [{pitcher_id}]")
 
     if balls is not None:
         values = ",".join(str(ball) for ball in balls)
@@ -190,6 +194,18 @@ def get_batter_names(data):
     return dict(zip(lookup["key_mlbam"], lookup["name"]))
 
 
+def get_pitcher_names(data):
+    pitcher_ids = (
+        data["pitcher"].dropna().astype(int).drop_duplicates().sort_values().tolist()
+    )
+    if not pitcher_ids:
+        return {}
+
+    lookup = playerid_reverse_lookup(pitcher_ids, key_type="mlbam")
+    lookup["name"] = (lookup["name_first"] + " " + lookup["name_last"]).str.title()
+    return dict(zip(lookup["key_mlbam"], lookup["name"]))
+
+
 def format_statcast_player_name(name):
     if pd.isna(name) or not name:
         return None
@@ -217,9 +233,13 @@ def clean_statcast_data(data):
     data = data.copy()
     numeric_columns = [
         "batter",
+        "pitcher",
         "delta_home_win_exp",
         "launch_speed",
         "hit_distance_sc",
+        "release_speed",
+        "api_break_x_arm",
+        "pfx_z",
         "outs_when_up",
         "game_year",
         "balls",
@@ -238,6 +258,12 @@ def batting_team_for_play(row):
     if row.get("inning_topbot") == "Top":
         return row.get("away_team")
     return row.get("home_team")
+
+
+def pitching_team_for_play(row):
+    if row.get("inning_topbot") == "Top":
+        return row.get("home_team")
+    return row.get("away_team")
 
 
 def runners_on_base(row):
@@ -292,6 +318,30 @@ def video_url_for_play(row):
     )
 
 
+def video_url_for_pitch(row):
+    season = row.get("game_year")
+    team_abbr = pitching_team_for_play(row)
+    team_id = TEAM_IDS.get(str(team_abbr).upper()) if pd.notna(team_abbr) else None
+    pitcher_id = row.get("pitcher")
+    outs = row.get("outs_when_up")
+    balls = row.get("balls")
+    strikes = row.get("strikes")
+    inning = row.get("inning")
+    game_date = row.get("game_date")
+
+    return make_mlb_video_search_url(
+        runner_on_base=runners_on_base(row),
+        outs=[int(outs)] if pd.notna(outs) else None,
+        seasons=[int(season)] if pd.notna(season) else None,
+        team_id=team_id,
+        game_dates=[str(game_date)] if pd.notna(game_date) else None,
+        pitcher_id=int(pitcher_id) if pd.notna(pitcher_id) else None,
+        balls=[int(balls)] if pd.notna(balls) else None,
+        strikes=[int(strikes)] if pd.notna(strikes) else None,
+        innings=[int(inning)] if pd.notna(inning) else None,
+    )
+
+
 def format_value(value, unit="", decimals=1):
     if pd.isna(value):
         return "unknown"
@@ -325,6 +375,30 @@ def describe_play(label, row, batter_names, metric_text):
     print(f"MLB video search: {video_url_for_play(row)}")
 
 
+def describe_pitch(label, row, pitcher_names, metric_text):
+    pitcher_id = int(row["pitcher"]) if pd.notna(row.get("pitcher")) else None
+    statcast_name = format_statcast_player_name(row.get("player_name"))
+    player = (
+        pitcher_names.get(pitcher_id)
+        or statcast_name
+        or (f"MLBAM {pitcher_id}" if pitcher_id else "Unknown")
+    )
+    game_date = row.get("game_date", "unknown date")
+    pitching_team = pitching_team_for_play(row)
+    matchup = f"{row.get('away_team')} at {row.get('home_team')}"
+    pitch_name = row.get("pitch_name") or row.get("pitch_type") or "unknown pitch"
+    description = str(row.get("description", "unknown")).replace("_", " ")
+
+    print(f"\n{label}")
+    print(f"Pitcher: {player}")
+    print(f"Metric: {metric_text}")
+    print(f"Game: {game_date} - {matchup}")
+    print(f"Pitching team: {pitching_team}")
+    print(f"Pitch: {pitch_name}")
+    print(f"Result: {description}")
+    print(f"MLB video search: {video_url_for_pitch(row)}")
+
+
 def row_with_largest_abs_value(data, column):
     values = data[column].dropna()
     if values.empty:
@@ -339,6 +413,13 @@ def row_with_largest_value(data, column):
     return data.loc[values.idxmax()]
 
 
+def row_with_smallest_value(data, column):
+    values = data[column].dropna()
+    if values.empty:
+        return None
+    return data.loc[values.idxmin()]
+
+
 def print_result(label, row, batter_names, metric_text):
     if row is None:
         print(f"\n{label}")
@@ -346,6 +427,15 @@ def print_result(label, row, batter_names, metric_text):
         return
 
     describe_play(label, row, batter_names, metric_text(row))
+
+
+def print_pitch_result(label, row, pitcher_names, metric_text):
+    if row is None:
+        print(f"\n{label}")
+        print("No qualifying Statcast row found.")
+        return
+
+    describe_pitch(label, row, pitcher_names, metric_text(row))
 
 
 def main():
@@ -359,14 +449,24 @@ def main():
         return
 
     batter_names = get_batter_names(data)
+    pitcher_names = get_pitcher_names(data)
     completed_plays = data[data["events"].notna()]
     videoable_plays = completed_plays[
         completed_plays["events"].map(HIT_RESULT_BY_EVENT).notna()
     ]
+    pitches = data[data["pitcher"].notna()]
+    pitches = pitches.assign(
+        horizontal_break_inches=pitches["api_break_x_arm"] * 12,
+        ivb_inches=pitches["pfx_z"] * 12,
+    )
 
     win_exp_row = row_with_largest_abs_value(videoable_plays, "delta_home_win_exp")
     hardest_hit_row = row_with_largest_value(videoable_plays, "launch_speed")
     farthest_hit_row = row_with_largest_value(videoable_plays, "hit_distance_sc")
+    hardest_pitch_row = row_with_largest_value(pitches, "release_speed")
+    horizontal_break_row = row_with_largest_abs_value(pitches, "horizontal_break_inches")
+    vertical_drop_row = row_with_smallest_value(pitches, "ivb_inches")
+    vertical_rise_row = row_with_largest_value(pitches, "ivb_inches")
 
     print_result(
         "Biggest swing in win expectancy",
@@ -388,6 +488,30 @@ def main():
         farthest_hit_row,
         batter_names,
         lambda row: f"{format_value(row.get('hit_distance_sc'), ' ft', 0)} projected distance",
+    )
+    print_pitch_result(
+        "Hardest-thrown pitch",
+        hardest_pitch_row,
+        pitcher_names,
+        lambda row: f"{format_value(row.get('release_speed'), ' mph', 1)} velocity",
+    )
+    print_pitch_result(
+        "Pitch with most horizontal break",
+        horizontal_break_row,
+        pitcher_names,
+        lambda row: f"{format_value(abs(row.get('horizontal_break_inches')), ' in', 1)} horizontal break",
+    )
+    print_pitch_result(
+        "Pitch with most vertical drop",
+        vertical_drop_row,
+        pitcher_names,
+        lambda row: f"{format_value(row.get('ivb_inches'), ' in', 1)} IVB",
+    )
+    print_pitch_result(
+        "Pitch with most vertical rise",
+        vertical_rise_row,
+        pitcher_names,
+        lambda row: f"{format_value(row.get('ivb_inches'), ' in', 1)} IVB",
     )
 
 
