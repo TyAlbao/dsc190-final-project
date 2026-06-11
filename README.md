@@ -27,6 +27,12 @@ python main.py
 
 By default, the script searches yesterday's games.
 
+If you pass `--start` without `--end`, the script searches only that start date:
+
+```powershell
+python main.py --start 2026-05-31
+```
+
 To retrain the catch-probability model with post-shift-ban Statcast data and
 save it for later runs:
 

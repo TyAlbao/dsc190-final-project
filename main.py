@@ -283,8 +283,8 @@ def parse_args():
     )
     parser.add_argument(
         "--end",
-        default=yesterday.isoformat(),
-        help="End date in YYYY-MM-DD format. Defaults to yesterday.",
+        default=None,
+        help="End date in YYYY-MM-DD format. Defaults to --start.",
     )
     parser.add_argument(
         "--catch-train-start",
@@ -315,7 +315,10 @@ def parse_args():
         default=14,
         help="Number of days per Statcast request when training a saved model.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.end is None:
+        args.end = args.start
+    return args
 
 
 def get_batter_names(data):
