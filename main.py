@@ -742,6 +742,12 @@ def print_defensive_result(label, row, batter_names, metric_text):
     describe_defensive_play(label, row, batter_names, metric_text(row))
 
 
+def print_section(title):
+    print(f"\n{'=' * 72}")
+    print(title)
+    print("=" * 72)
+
+
 def bounded_score(value, low, high):
     if pd.isna(value):
         return 0
@@ -1176,6 +1182,7 @@ def main():
         catch_model=catch_model,
     )
 
+    print_section("Best Games by Win Expectancy")
     print_win_exp_result(
         "Biggest swing in win expectancy",
         win_exp_row,
@@ -1186,6 +1193,8 @@ def main():
             "change in home win expectancy"
         ),
     )
+
+    print_section("Hitters")
     print_result(
         "Hardest-hit ball",
         hardest_hit_row,
@@ -1198,6 +1207,8 @@ def main():
         batter_names,
         lambda row: f"{format_value(row.get('hit_distance_sc'), ' ft', 0)} projected distance",
     )
+
+    print_section("Pitchers")
     print_pitch_result(
         "Hardest-thrown pitch",
         hardest_pitch_row,
@@ -1222,6 +1233,8 @@ def main():
         pitcher_names,
         lambda row: f"{format_value(row.get('ivb_inches'), ' in', 1)} IVB",
     )
+
+    print_section("Defense")
     print_defensive_result(
         "Lowest catch-probability defensive play",
         defensive_play_row,
