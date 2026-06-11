@@ -163,6 +163,7 @@ CATCH_CATEGORICAL_COLUMNS = [
 ]
 
 CATCH_MODEL_VERSION = 1
+MIN_PITCHER_GAME_BF = 10
 
 
 BATTER_NAME_PATTERN = re.compile(
@@ -813,6 +814,151 @@ def print_best_hitter_game(summary):
     print(f"Game PK: {summary['game_pk']}")
 
 
+def outs_recorded_for_event(event):
+    if event in {"double_play", "grounded_into_double_play", "strikeout_double_play", "sac_fly_double_play", "sac_bunt_double_play"}:
+        return 2
+    if event == "triple_play":
+        return 3
+    if event in {
+        "field_out",
+        "force_out",
+        "fielders_choice_out",
+        "other_out",
+        "strikeout",
+        "sac_fly",
+        "sac_bunt",
+    }:
+        return 1
+    return 0
+
+
+def format_innings_pitched(outs):
+    innings = outs // 3
+    remainder = outs % 3
+    return f"{innings}.{remainder}"
+
+
+def pitcher_game_summaries(data, pitcher_names, min_bf=MIN_PITCHER_GAME_BF):
+    required_columns = {
+        "game_pk",
+        "pitcher",
+        "woba_value",
+        "woba_denom",
+        "events",
+        "home_team",
+        "away_team",
+        "game_date",
+    }
+    if not required_columns.issubset(data.columns):
+        return {}
+
+    completed = data[data["events"].notna()].copy()
+    completed["woba_value"] = pd.to_numeric(completed["woba_value"], errors="coerce")
+    completed["woba_denom"] = pd.to_numeric(completed["woba_denom"], errors="coerce")
+    if "bat_score" in completed.columns and "post_bat_score" in completed.columns:
+        completed["runs_on_play"] = (
+            pd.to_numeric(completed["post_bat_score"], errors="coerce")
+            - pd.to_numeric(completed["bat_score"], errors="coerce")
+        ).clip(lower=0)
+    else:
+        completed["runs_on_play"] = 0
+
+    summaries = []
+    for (game_pk, pitcher_id), rows in completed.groupby(["game_pk", "pitcher"], dropna=True):
+        denom = rows["woba_denom"].fillna(0).sum()
+        if denom <= 0:
+            continue
+
+        first_row = rows.iloc[0]
+        events = rows["events"]
+        pitcher_id = int(pitcher_id)
+        strikeouts = int(events.isin(["strikeout", "strikeout_double_play"]).sum())
+        walks = int(events.isin(["walk", "intent_walk"]).sum())
+        hits = int(events.isin(["single", "double", "triple", "home_run"]).sum())
+        homers = int((events == "home_run").sum())
+        outs = int(events.map(outs_recorded_for_event).sum())
+        runs = int(rows["runs_on_play"].fillna(0).sum())
+
+        summaries.append(
+            {
+                "player": pitcher_names.get(pitcher_id)
+                or format_statcast_player_name(first_row.get("player_name"))
+                or f"MLBAM {pitcher_id}",
+                "pitcher_id": pitcher_id,
+                "game_pk": int(game_pk),
+                "game_date": first_row.get("game_date"),
+                "away_team": first_row.get("away_team"),
+                "home_team": first_row.get("home_team"),
+                "woba_allowed": float(rows["woba_value"].fillna(0).sum() / denom),
+                "bf": int(denom),
+                "outs": outs,
+                "strikeouts": strikeouts,
+                "walks": walks,
+                "hits": hits,
+                "homers": homers,
+                "runs": runs,
+            }
+        )
+
+    if not summaries:
+        return {}
+
+    qualified = [summary for summary in summaries if summary["bf"] >= min_bf]
+    if not qualified:
+        qualified = summaries
+
+    return {
+        "best": min(qualified, key=lambda summary: summary["woba_allowed"]),
+        "worst": max(qualified, key=lambda summary: summary["woba_allowed"]),
+        "most_strikeouts": max(summaries, key=lambda summary: (summary["strikeouts"], summary["outs"], -summary["woba_allowed"])),
+        "min_bf": min_bf,
+    }
+
+
+def print_pitcher_game_summary(label, summary, min_bf=None):
+    print(f"\n{label}")
+    if summary is None:
+        print("No qualifying pitcher games found.")
+        return
+
+    print(f"Pitcher: {summary['player']}")
+    print(f"Metric: {summary['woba_allowed']:.3f} wOBA allowed")
+    if min_bf is not None:
+        print(f"Qualifier: minimum {min_bf} batters faced")
+    print(f"Game: {summary['game_date']} - {summary['away_team']} at {summary['home_team']}")
+    print(
+        "Line: "
+        f"{format_innings_pitched(summary['outs'])} IP, "
+        f"{summary['strikeouts']} K, "
+        f"{summary['walks']} BB, "
+        f"{summary['hits']} H, "
+        f"{summary['homers']} HR, "
+        f"{summary['runs']} R, "
+        f"{summary['bf']} BF"
+    )
+    print(f"Game PK: {summary['game_pk']}")
+
+
+def print_most_strikeouts(summary):
+    print("\nMost strikeouts")
+    if summary is None:
+        print("No qualifying pitcher games found.")
+        return
+
+    print(f"Pitcher: {summary['player']}")
+    print(f"Strikeouts: {summary['strikeouts']}")
+    print(f"Game: {summary['game_date']} - {summary['away_team']} at {summary['home_team']}")
+    print(
+        "Line: "
+        f"{format_innings_pitched(summary['outs'])} IP, "
+        f"{summary['woba_allowed']:.3f} wOBA allowed, "
+        f"{summary['walks']} BB, "
+        f"{summary['hits']} H, "
+        f"{summary['runs']} R"
+    )
+    print(f"Game PK: {summary['game_pk']}")
+
+
 def print_result(label, row, batter_names, metric_text):
     if row is None:
         print(f"\n{label}")
@@ -1441,6 +1587,7 @@ def main():
     lead_changes_game = game_with_most_lead_changes(data)
     game_summaries = game_stat_summaries(data)
     best_hitter_summary = best_hitter_game(data, batter_names)
+    pitcher_summaries = pitcher_game_summaries(data, pitcher_names)
     hardest_hit_row = row_with_largest_value(videoable_plays, "launch_speed")
     farthest_hit_row = row_with_largest_value(videoable_plays, "hit_distance_sc")
     hardest_pitch_row = row_with_largest_value(pitches, "release_speed")
@@ -1506,6 +1653,17 @@ def main():
     )
 
     print_section("Pitchers")
+    print_pitcher_game_summary(
+        "Best overall pitcher game",
+        pitcher_summaries.get("best"),
+        pitcher_summaries.get("min_bf"),
+    )
+    print_pitcher_game_summary(
+        "Worst overall pitcher game",
+        pitcher_summaries.get("worst"),
+        pitcher_summaries.get("min_bf"),
+    )
+    print_most_strikeouts(pitcher_summaries.get("most_strikeouts"))
     print_pitch_result(
         "Hardest-thrown pitch",
         hardest_pitch_row,
