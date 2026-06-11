@@ -438,6 +438,17 @@ def pitching_team_for_play(row):
     return row.get("away_team")
 
 
+def win_exp_benefiting_team(row):
+    change = row.get("delta_home_win_exp")
+    if pd.isna(change):
+        return None
+    if change > 0:
+        return row.get("home_team")
+    if change < 0:
+        return row.get("away_team")
+    return None
+
+
 def runners_on_base(row):
     bases = []
     for base, column in [(1, "on_1b"), (2, "on_2b"), (3, "on_3b")]:
@@ -574,6 +585,54 @@ def describe_play(label, row, batter_names, metric_text):
     print(f"MLB video search: {video_url_for_play(row)}")
 
 
+def describe_win_exp_play(label, row, batter_names, pitcher_names, metric_text):
+    batter_id = int(row["batter"]) if pd.notna(row.get("batter")) else None
+    pitcher_id = int(row["pitcher"]) if pd.notna(row.get("pitcher")) else None
+    description = row.get("des", "")
+    batting_team = batting_team_for_play(row)
+    pitching_team = pitching_team_for_play(row)
+    benefiting_team = win_exp_benefiting_team(row)
+
+    batter = (
+        player_name_from_description(description)
+        or batter_names.get(batter_id)
+        or (f"MLBAM {batter_id}" if batter_id else "Unknown")
+    )
+    pitcher = (
+        pitcher_names.get(pitcher_id)
+        or format_statcast_player_name(row.get("player_name"))
+        or (f"MLBAM {pitcher_id}" if pitcher_id else "Unknown")
+    )
+
+    if benefiting_team == batting_team:
+        impact_player = batter
+        impact_role = "batter"
+    elif benefiting_team == pitching_team:
+        impact_player = pitcher
+        impact_role = "pitcher"
+    else:
+        impact_player = batter
+        impact_role = "batter"
+
+    game_date = row.get("game_date", "unknown date")
+    matchup = f"{row.get('away_team')} at {row.get('home_team')}"
+    event = str(row.get("events", "unknown")).replace("_", " ")
+
+    print(f"\n{label}")
+    print(f"Player: {impact_player}")
+    print(f"Role: {impact_role}")
+    if benefiting_team:
+        print(f"Benefiting team: {benefiting_team}")
+    print(f"Metric: {metric_text}")
+    print(f"Game: {game_date} - {matchup}")
+    print(f"Batting team: {batting_team}")
+    print(f"Pitching team: {pitching_team}")
+    print(f"Result: {event}")
+    if pd.notna(description) and description:
+        print(f"Play: {description}")
+    print(f"MLB video search: {video_url_for_play(row)}")
+
+
 def describe_pitch(label, row, pitcher_names, metric_text):
     pitcher_id = int(row["pitcher"]) if pd.notna(row.get("pitcher")) else None
     statcast_name = format_statcast_player_name(row.get("player_name"))
@@ -654,6 +713,15 @@ def print_result(label, row, batter_names, metric_text):
         return
 
     describe_play(label, row, batter_names, metric_text(row))
+
+
+def print_win_exp_result(label, row, batter_names, pitcher_names, metric_text):
+    if row is None:
+        print(f"\n{label}")
+        print("No qualifying Statcast row found.")
+        return
+
+    describe_win_exp_play(label, row, batter_names, pitcher_names, metric_text(row))
 
 
 def print_pitch_result(label, row, pitcher_names, metric_text):
@@ -1108,10 +1176,11 @@ def main():
         catch_model=catch_model,
     )
 
-    print_result(
+    print_win_exp_result(
         "Biggest swing in win expectancy",
         win_exp_row,
         batter_names,
+        pitcher_names,
         lambda row: (
             f"{format_value(np.abs(row.get('delta_home_win_exp')) * 100, '%', 1)} "
             "change in home win expectancy"
