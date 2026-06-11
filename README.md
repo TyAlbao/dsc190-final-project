@@ -15,6 +15,10 @@ python main.py --start 2024-04-01 --end 2024-04-01
 This fetches Statcast data for April 1, 2024 and prints the top play for each
 category.
 
+The script also loads `catch_probability_model.npz` automatically when it is
+present. That saved model is used to choose the lowest catch-probability
+defensive play of the day.
+
 You can also run it without arguments:
 
 ```powershell
@@ -22,3 +26,16 @@ python main.py
 ```
 
 By default, the script searches yesterday's games.
+
+To retrain the catch-probability model with post-shift-ban Statcast data and
+save it for later runs:
+
+```powershell
+python main.py --train-catch-model --catch-train-start 2023-03-30 --catch-train-end 2026-06-10 --catch-model-path catch_probability_model.npz
+```
+
+Training uses 14-day Statcast chunks by default. You can change that chunk size:
+
+```powershell
+python main.py --train-catch-model --catch-train-start 2023-03-30 --catch-train-end 2026-06-10 --catch-train-chunk-days 7
+```
