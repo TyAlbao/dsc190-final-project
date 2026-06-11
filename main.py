@@ -808,6 +808,91 @@ def game_with_most_lead_changes(data):
     return best_game
 
 
+def game_stat_summaries(data):
+    required_columns = {
+        "game_pk",
+        "events",
+        "home_team",
+        "away_team",
+        "game_date",
+        "post_home_score",
+        "post_away_score",
+    }
+    if not required_columns.issubset(data.columns):
+        return {}
+
+    completed_plays = data[data["events"].notna()].copy()
+    if completed_plays.empty:
+        return {}
+
+    summaries = []
+    for game_pk, game in completed_plays.groupby("game_pk"):
+        game = game.sort_values(["at_bat_number", "pitch_number"])
+        last_play = game.iloc[-1]
+        away_score = last_play.get("post_away_score")
+        home_score = last_play.get("post_home_score")
+        if pd.isna(away_score) or pd.isna(home_score):
+            continue
+
+        hits_mask = game["events"].isin({"single", "double", "triple", "home_run"})
+        away_hits = int(
+            hits_mask[game["inning_topbot"] == "Top"].sum()
+            if "inning_topbot" in game.columns
+            else 0
+        )
+        home_hits = int(
+            hits_mask[game["inning_topbot"] == "Bot"].sum()
+            if "inning_topbot" in game.columns
+            else 0
+        )
+        summaries.append(
+            {
+                "game_pk": int(game_pk),
+                "game_date": last_play.get("game_date"),
+                "away_team": last_play.get("away_team"),
+                "home_team": last_play.get("home_team"),
+                "away_score": int(away_score),
+                "home_score": int(home_score),
+                "total_runs": int(away_score + home_score),
+                "away_hits": away_hits,
+                "home_hits": home_hits,
+                "total_hits": away_hits + home_hits,
+            }
+        )
+
+    if not summaries:
+        return {}
+
+    return {
+        "most_runs": max(summaries, key=lambda game: game["total_runs"]),
+        "most_hits": max(summaries, key=lambda game: game["total_hits"]),
+        "fewest_runs": min(summaries, key=lambda game: game["total_runs"]),
+        "fewest_hits": min(summaries, key=lambda game: game["total_hits"]),
+    }
+
+
+def print_game_stat_result(label, summary, metric_label, metric_key):
+    print(f"\n{label}")
+    if summary is None:
+        print("No qualifying games found.")
+        return
+
+    print(f"Game: {summary['game_date']} - {summary['away_team']} at {summary['home_team']}")
+    print(f"{metric_label}: {summary[metric_key]}")
+    print(
+        "Final score: "
+        f"{summary['away_team']} {summary['away_score']}, "
+        f"{summary['home_team']} {summary['home_score']}"
+    )
+    if metric_key == "total_hits":
+        print(
+            "Hits: "
+            f"{summary['away_team']} {summary['away_hits']}, "
+            f"{summary['home_team']} {summary['home_hits']}"
+        )
+    print(f"Game PK: {summary['game_pk']}")
+
+
 def print_lead_changes_result(summary):
     print("\nGame with most lead changes")
     if summary is None:
@@ -1247,6 +1332,7 @@ def main():
 
     win_exp_row = row_with_largest_abs_value(videoable_plays, "delta_home_win_exp")
     lead_changes_game = game_with_most_lead_changes(data)
+    game_summaries = game_stat_summaries(data)
     hardest_hit_row = row_with_largest_value(videoable_plays, "launch_speed")
     farthest_hit_row = row_with_largest_value(videoable_plays, "hit_distance_sc")
     hardest_pitch_row = row_with_largest_value(pitches, "release_speed")
@@ -1259,7 +1345,7 @@ def main():
         catch_model=catch_model,
     )
 
-    print_section("Best Games by Win Expectancy")
+    print_section("Best Games")
     print_win_exp_result(
         "Biggest swing in win expectancy",
         win_exp_row,
@@ -1271,6 +1357,30 @@ def main():
         ),
     )
     print_lead_changes_result(lead_changes_game)
+    print_game_stat_result(
+        "Most total runs",
+        game_summaries.get("most_runs"),
+        "Total runs",
+        "total_runs",
+    )
+    print_game_stat_result(
+        "Most total hits",
+        game_summaries.get("most_hits"),
+        "Total hits",
+        "total_hits",
+    )
+    print_game_stat_result(
+        "Fewest total runs",
+        game_summaries.get("fewest_runs"),
+        "Total runs",
+        "total_runs",
+    )
+    print_game_stat_result(
+        "Fewest total hits",
+        game_summaries.get("fewest_hits"),
+        "Total hits",
+        "total_hits",
+    )
 
     print_section("Hitters")
     print_result(
