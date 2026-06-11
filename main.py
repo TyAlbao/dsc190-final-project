@@ -90,6 +90,11 @@ def make_mlb_video_search_url(
     hit_results=None,
     seasons=None,
     team_id=None,
+    game_dates=None,
+    batter_id=None,
+    balls=None,
+    strikes=None,
+    innings=None,
     page=0,
 ):
     clauses = []
@@ -116,6 +121,25 @@ def make_mlb_video_search_url(
 
     if team_id is not None:
         clauses.append(f"TeamId == [{team_id}]")
+
+    if game_dates is not None:
+        values = json.dumps(game_dates, separators=(",", ":"))
+        clauses.append(f"Date = {values}")
+
+    if batter_id is not None:
+        clauses.append(f"BatterId = [{batter_id}]")
+
+    if balls is not None:
+        values = ",".join(str(ball) for ball in balls)
+        clauses.append(f"Balls = [{values}]")
+
+    if strikes is not None:
+        values = ",".join(str(strike) for strike in strikes)
+        clauses.append(f"Strikes = [{values}]")
+
+    if innings is not None:
+        values = ",".join(str(inning) for inning in innings)
+        clauses.append(f"Inning = [{values}]")
 
     query = " AND ".join(clauses)
     if query:
@@ -198,6 +222,9 @@ def clean_statcast_data(data):
         "hit_distance_sc",
         "outs_when_up",
         "game_year",
+        "balls",
+        "strikes",
+        "inning",
     ]
 
     for column in numeric_columns:
@@ -242,7 +269,12 @@ def video_url_for_play(row):
     season = row.get("game_year")
     team_abbr = batting_team_for_play(row)
     team_id = TEAM_IDS.get(str(team_abbr).upper()) if pd.notna(team_abbr) else None
+    batter_id = row.get("batter")
     outs = row.get("outs_when_up")
+    balls = row.get("balls")
+    strikes = row.get("strikes")
+    inning = row.get("inning")
+    game_date = row.get("game_date")
     hit_result = hit_result_for_video(row)
 
     return make_mlb_video_search_url(
@@ -252,6 +284,11 @@ def video_url_for_play(row):
         hit_results=[hit_result] if hit_result is not None else None,
         seasons=[int(season)] if pd.notna(season) else None,
         team_id=team_id,
+        game_dates=[str(game_date)] if pd.notna(game_date) else None,
+        batter_id=int(batter_id) if pd.notna(batter_id) else None,
+        balls=[int(balls)] if pd.notna(balls) else None,
+        strikes=[int(strikes)] if pd.notna(strikes) else None,
+        innings=[int(inning)] if pd.notna(inning) else None,
     )
 
 
