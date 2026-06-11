@@ -1,47 +1,68 @@
 # MLB Statcast Highlight Finder
 
-This tool finds the player responsible for the biggest win-expectancy swing, the
-hardest-hit ball, and the farthest-hit ball in a Statcast date range. It prints
-the matching play details and builds an MLB.com video search link for each play.
+This command-line tool pulls MLB Statcast data for a date or date range and
+prints a readable daily highlight report. It finds notable games, hitter
+performances, pitcher performances, pitch-level extremes, and the lowest
+catch-probability defensive play, then includes specific MLB Film Room search
+links for play-level highlights.
 
 ## Usage
 
-Run the script with Python and pass a start and end date in `YYYY-MM-DD` format:
-
-```powershell
-python main.py --start 2024-04-01 --end 2024-04-01
-```
-
-This fetches Statcast data for April 1, 2024 and prints the top play for each
-category.
-
-The script also loads `catch_probability_model.npz` automatically when it is
-present. That saved model is used to choose the lowest catch-probability
-defensive play of the day.
-
-You can also run it without arguments:
-
-```powershell
-python main.py
-```
-
-By default, the script searches yesterday's games.
-
-If you pass `--start` without `--end`, the script searches only that start date:
+Run a single day:
 
 ```powershell
 python main.py --start 2026-05-31
 ```
 
-To retrain the catch-probability model with post-shift-ban Statcast data and
-save it for later runs:
+When `--end` is omitted, it defaults to the same date as `--start`.
+
+Run a date range:
+
+```powershell
+python main.py --start 2026-05-31 --end 2026-06-09
+```
+
+Run yesterday's games:
+
+```powershell
+python main.py
+```
+
+## Expected Output
+
+The report is split into four sections:
+
+- `Best Games`: biggest win-expectancy swing, most lead changes, most/fewest
+  total runs, and most/fewest total hits.
+- `Hitters`: best overall hitter game by game wOBA, hardest-hit ball, and
+  farthest-hit ball.
+- `Pitchers`: best and worst pitcher games by wOBA allowed, most strikeouts,
+  hardest-thrown pitch, most horizontal break, most vertical drop, and most
+  vertical rise.
+- `Defense`: successful defensive play made with the lowest catch-probability using the saved model.
+
+Play-level entries include game context, player/team info, the key metric, a
+play description, and an MLB Film Room search link.
+
+## Catch-Probability Model
+
+If `catch_probability_model.npz` exists, the script loads it automatically for
+the defensive section. The included model was trained on post-shift-ban Statcast
+data from `2023-03-30` through `2026-06-10`.
+
+Retrain and save the model:
 
 ```powershell
 python main.py --train-catch-model --catch-train-start 2023-03-30 --catch-train-end 2026-06-10 --catch-model-path catch_probability_model.npz
 ```
 
-Training uses 14-day Statcast chunks by default. You can change that chunk size:
+Training uses 14-day Statcast chunks by default. To change the chunk size:
 
 ```powershell
 python main.py --train-catch-model --catch-train-start 2023-03-30 --catch-train-end 2026-06-10 --catch-train-chunk-days 7
 ```
+
+## Notes
+
+All summary stats are calculated from Statcast data so the numbers stay
+consistent with the play-level records and Film Room links.
