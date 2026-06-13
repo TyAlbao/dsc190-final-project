@@ -115,39 +115,6 @@ HIT_RESULT_BY_EVENT = {
     "foul_tip": "Foul Ball",
 }
 
-PITCH_RESULT_BY_DESCRIPTION = {
-    "ball": "Ball",
-    "called_strike": "Called Strike",
-    "swinging_strike": "Swinging Strike",
-    "foul": "Foul",
-    "blocked_ball": "Ball Blocked in Dirt",
-    "hit_by_pitch": "Hit By Pitch",
-    "missed_bunt": "Missed Bunt",
-    "pitchout": "Pitchout",
-    "foul_tip": "Foul Tip",
-    "foul_bunt": "Foul Bunt",
-    "swinging_strike_blocked": "Swinging Strike, Blocked in Dirt",
-    "bunt_foul_tip": "Bunt Foul Tip",
-    "foul_pitchout": "Foul Pitchout",
-    "automatic_ball": "Automatic Ball",
-    "automatic_strike": "Automatic Strike",
-    "passed_ball": "Passed Ball",
-    "wild_pitch": "Wild Pitch",
-    "other_advance": "Other Advance",
-    "pickoff_1b": "Pickoff, 1B",
-    "pickoff_2b": "Pickoff, 2B",
-    "pickoff_3b": "Pickoff, 3B",
-    "pickoff_attempt_1b": "Pickoff Attempt, 1B",
-    "pickoff_attempt_2b": "Pickoff Attempt, 2B",
-    "pickoff_attempt_3b": "Pickoff Attempt, 3B",
-    "pickoff_caught_stealing_home": "Pickoff Caught Stealing Home",
-    "pickoff_caught_stealing_2b": "Pickoff, Caught Stealing, 2B",
-    "pickoff_caught_stealing_3b": "Pickoff, Caught Stealing, 3B",
-    "pickoff_error_1b": "Pickoff, Error, 1B",
-    "pickoff_error_2b": "Pickoff, Error, 2B",
-}
-
-
 BATTED_BALL_OUT_EVENTS = {
     "field_out",
     "force_out",
@@ -530,7 +497,11 @@ def pitch_result_for_video(row):
     if pd.isna(description):
         return None
 
-    return str(description)
+    description = str(description)
+    if description == "hit_into_play":
+        return None
+
+    return description
 
 
 def video_url_for_play(row):
@@ -560,11 +531,17 @@ def video_url_for_pitch(row):
     strikes = row.get("strikes")
     inning = row.get("inning")
     game_date = game_date_for_video(row)
+    hit_result = hit_result_for_video(row)
     pitch_result = pitch_result_for_video(row)
 
     return make_mlb_video_search_url(
         outs=[int(outs)] if pd.notna(outs) else None,
-        pitch_results=[pitch_result] if pitch_result is not None else None,
+        hit_results=[hit_result] if hit_result is not None else None,
+        pitch_results=(
+            [pitch_result]
+            if hit_result is None and pitch_result is not None
+            else None
+        ),
         game_dates=[str(game_date)] if pd.notna(game_date) else None,
         pitcher_id=int(pitcher_id) if pd.notna(pitcher_id) else None,
         balls=[int(balls)] if pd.notna(balls) else None,
